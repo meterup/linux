@@ -132,6 +132,11 @@ static int parse_qcomsmem_part(struct mtd_info *mtd,
 		parts[i].offset = le32_to_cpu(pentry->offset) * mtd->erasesize;
 		parts[i].mask_flags = pentry->attr;
 		parts[i].size = le32_to_cpu(pentry->length) * mtd->erasesize;
+
+		/* "rootfs" conflicts with OpenWrt auto mounting */
+		if (mtd_type_is_nand(mtd) && !strcmp(name, "rootfs"))
+			parts[i].name = "ubi";
+
 		pr_debug("%d: %s offs=0x%08x size=0x%08x attr:0x%08x\n",
 			 i, pentry->name, le32_to_cpu(pentry->offset),
 			 le32_to_cpu(pentry->length), pentry->attr);
