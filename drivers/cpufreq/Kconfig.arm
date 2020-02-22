@@ -150,6 +150,18 @@ config ARM_QCOM_CPUFREQ_HW
 	  The driver implements the cpufreq interface for this HW engine.
 	  Say Y if you want to support CPUFreq HW.
 
+config ARM_QCOM_CPUFREQ_KRAIT
+	tristate "CPU Frequency scaling support for Krait SoCs"
+	depends on ARCH_QCOM || COMPILE_TEST
+	select PM_OPP
+	select ARM_QCOM_CPUFREQ_NVMEM
+	help
+	  This adds the CPUFreq driver for Qualcomm Krait SoC based boards.
+	  This scale the cache clk and regulator based on the different cpu
+	  clks when scaling the different cores clk.
+
+	  If in doubt, say N.
+
 config ARM_RASPBERRYPI_CPUFREQ
 	tristate "Raspberry Pi cpufreq support"
 	depends on CLK_RASPBERRYPI || COMPILE_TEST
