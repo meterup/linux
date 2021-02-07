@@ -52,6 +52,7 @@ struct qcom_cpufreq_match_data {
 			   char **pvs_name,
 			   struct qcom_cpufreq_drv *drv);
 	const char **genpd_names;
+	const char *cpufreq_driver;
 };
 
 struct qcom_cpufreq_drv {
@@ -250,6 +251,7 @@ static const struct qcom_cpufreq_match_data match_data_kryo = {
 
 static const struct qcom_cpufreq_match_data match_data_krait = {
 	.get_version = qcom_cpufreq_krait_name_version,
+	.cpufreq_driver = "krait-cpufreq",
 };
 
 static const char *qcs404_genpd_names[] = { "cpr", NULL };
@@ -382,6 +384,19 @@ static int qcom_cpufreq_probe(struct platform_device *pdev)
 						ret);
 				goto free_genpd_opp;
 			}
+		}
+	}
+
+	if (drv->data->cpufreq_driver) {
+		cpufreq_dt_pdev = platform_device_register_simple(
+			drv->data->cpufreq_driver, -1, NULL, 0);
+		if (!IS_ERR(cpufreq_dt_pdev)) {
+			platform_set_drvdata(pdev, drv);
+			return 0;
+		} else {
+			dev_err(cpu_dev,
+				"Failed to register dedicated %s cpufreq\n",
+				drv->data->cpufreq_driver);
 		}
 	}
 
