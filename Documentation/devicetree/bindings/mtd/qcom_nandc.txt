@@ -52,6 +52,15 @@ Optional properties:
 			be used according to chip requirement and available
 			OOB size.
 
+EBI2 specific properties:
+- nand-is-boot-medium:	nand contains boot partitions and different ecc configuration
+			should be used for these partitions.
+- qcom,boot_pages_size:	should contain the size of the total boot partitions
+			where the boot layout read/write specific configuration
+			should be used. The boot layout is considered from the
+			start of the nand to the value set in this binding.
+			Only used in combination with 'nand-is-boot-medium'.
+
 Each nandcs device node may optionally contain a 'partitions' sub-node, which
 further contains sub-nodes describing the flash partition mapping. See
 partition.txt for more detail.
@@ -79,6 +88,9 @@ nand-controller@1ac00000 {
 
 		nand-ecc-strength = <4>;
 		nand-bus-width = <8>;
+
+		nand-is-boot-medium;
+		qcom,boot_pages_size: <0x58a0000>;
 
 		partitions {
 			compatible = "fixed-partitions";
