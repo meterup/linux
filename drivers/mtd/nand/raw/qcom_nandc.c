@@ -158,6 +158,11 @@
 /* NAND_CTRL bits */
 #define	BAM_MODE_EN			BIT(0)
 
+
+#define UD_SIZE_BYTES_MASK	(0x3ff << UD_SIZE_BYTES)
+#define SPARE_SIZE_BYTES_MASK	(0xf << SPARE_SIZE_BYTES)
+#define ECC_NUM_DATA_BYTES_MASK	(0x3ff << ECC_NUM_DATA_BYTES)
+
 /*
  * the NAND controller performs reads/writes with ECC in 516 byte chunks.
  * the driver calls the chunks 'step' or 'codeword' interchangeably
@@ -429,6 +434,13 @@ struct qcom_nand_controller {
  * @cfg0, cfg1, cfg0_raw..:	NANDc register configurations needed for
  *				ecc/non-ecc mode for the current nand flash
  *				device
+ *
+ * @boot_pages_conf:		keep track of the current ecc configuration used by
+ * 				the driver for read/write operation. (boot pages
+ * 				have different configuration than normal page)
+ * @boot_pages:			number of pages starting from 0 used as boot pages
+ * 				where the driver will use the boot pages ecc
+ * 				configuration for read/write operation
  */
 struct qcom_nand_host {
 	struct nand_chip chip;
@@ -451,6 +463,9 @@ struct qcom_nand_host {
 	u32 ecc_bch_cfg;
 	u32 clrflashstatus;
 	u32 clrreadstatus;
+
+	bool boot_pages_conf;
+	u32 boot_pages;
 };
 
 /*
@@ -459,12 +474,14 @@ struct qcom_nand_host {
  * @ecc_modes - ecc mode for NAND
  * @is_bam - whether NAND controller is using BAM
  * @is_qpic - whether NAND CTRL is part of qpic IP
+ * @has_boot_pages - whether NAND has different ecc settings for boot pages
  * @dev_cmd_reg_start - NAND_DEV_CMD_* registers starting offset
  */
 struct qcom_nandc_props {
 	u32 ecc_modes;
 	bool is_bam;
 	bool is_qpic;
+	bool has_boot_pages;
 	u32 dev_cmd_reg_start;
 };
 
@@ -1603,7 +1620,7 @@ qcom_nandc_read_cw_raw(struct mtd_info *mtd, struct nand_chip *chip,
 	data_size1 = mtd->writesize - host->cw_size * (ecc->steps - 1);
 	oob_size1 = host->bbm_size;
 
-	if (cw == (ecc->steps - 1)) {
+	if (cw == (ecc->steps - 1) && !host->boot_pages_conf) {
 		data_size2 = ecc->size - data_size1 -
 			     ((ecc->steps - 1) * 4);
 		oob_size2 = (ecc->steps * 4) + host->ecc_bytes_hw +
@@ -1684,7 +1701,7 @@ check_for_erased_page(struct qcom_nand_host *host, u8 *data_buf,
 	}
 
 	for_each_set_bit(cw, &uncorrectable_cws, ecc->steps) {
-		if (cw == (ecc->steps - 1)) {
+		if (cw == (ecc->steps - 1) && !host->boot_pages_conf) {
 			data_size = ecc->size - ((ecc->steps - 1) * 4);
 			oob_size = (ecc->steps * 4) + host->ecc_bytes_hw;
 		} else {
@@ -1843,7 +1860,7 @@ static int read_page_ecc(struct qcom_nand_host *host, u8 *data_buf,
 	for (i = 0; i < ecc->steps; i++) {
 		int data_size, oob_size;
 
-		if (i == (ecc->steps - 1)) {
+		if (i == (ecc->steps - 1) && !host->boot_pages_conf) {
 			data_size = ecc->size - ((ecc->steps - 1) << 2);
 			oob_size = (ecc->steps << 2) + host->ecc_bytes_hw +
 				   host->spare_bytes;
@@ -1940,6 +1957,30 @@ static int copy_last_cw(struct qcom_nand_host *host, int page)
 	return ret;
 }
 
+static void
+check_boot_pages_conf(struct qcom_nand_host *host, int page)
+{
+	bool boot_pages_conf = page < host->boot_pages;
+
+	/* Skip conf write if we are already in the correct mode */
+	if (boot_pages_conf != host->boot_pages_conf) {
+		host->boot_pages_conf = boot_pages_conf;
+
+		host->cw_data = boot_pages_conf ? 512 : 516;
+		host->spare_bytes = host->cw_size - host->ecc_bytes_hw -
+				    host->bbm_size - host->cw_data;
+
+		host->cfg0 &= ~(SPARE_SIZE_BYTES_MASK | UD_SIZE_BYTES_MASK);
+		host->cfg0 |= host->spare_bytes << SPARE_SIZE_BYTES |
+			      host->cw_data << UD_SIZE_BYTES;
+
+		host->ecc_bch_cfg &= ~ECC_NUM_DATA_BYTES_MASK;
+		host->ecc_bch_cfg |= host->cw_data << ECC_NUM_DATA_BYTES;
+		host->ecc_buf_cfg = (boot_pages_conf ? 0x1ff : 0x203) <<
+				     NUM_STEPS;
+	}
+}
+
 /* implements ecc->read_page() */
 static int qcom_nandc_read_page(struct nand_chip *chip, uint8_t *buf,
 				int oob_required, int page)
@@ -1947,6 +1988,9 @@ static int qcom_nandc_read_page(struct nand_chip *chip, uint8_t *buf,
 	struct qcom_nand_host *host = to_qcom_nand_host(chip);
 	struct qcom_nand_controller *nandc = get_qcom_nand_controller(chip);
 	u8 *data_buf, *oob_buf = NULL;
+
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
 
 	nand_read_page_op(chip, page, 0, NULL, 0);
 	data_buf = buf;
@@ -1966,6 +2010,9 @@ static int qcom_nandc_read_page_raw(struct nand_chip *chip, uint8_t *buf,
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
 	int cw, ret;
 	u8 *data_buf = buf, *oob_buf = chip->oob_poi;
+
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
 
 	for (cw = 0; cw < ecc->steps; cw++) {
 		ret = qcom_nandc_read_cw_raw(mtd, chip, data_buf, oob_buf,
@@ -1987,6 +2034,9 @@ static int qcom_nandc_read_oob(struct nand_chip *chip, int page)
 	struct qcom_nand_controller *nandc = get_qcom_nand_controller(chip);
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
 
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
+
 	clear_read_regs(nandc);
 	clear_bam_transaction(nandc);
 
@@ -2007,6 +2057,9 @@ static int qcom_nandc_write_page(struct nand_chip *chip, const uint8_t *buf,
 	u8 *data_buf, *oob_buf;
 	int i, ret;
 
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
+
 	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 
 	clear_read_regs(nandc);
@@ -2022,7 +2075,7 @@ static int qcom_nandc_write_page(struct nand_chip *chip, const uint8_t *buf,
 	for (i = 0; i < ecc->steps; i++) {
 		int data_size, oob_size;
 
-		if (i == (ecc->steps - 1)) {
+		if (i == (ecc->steps - 1) && !host->boot_pages_conf) {
 			data_size = ecc->size - ((ecc->steps - 1) << 2);
 			oob_size = (ecc->steps << 2) + host->ecc_bytes_hw +
 				   host->spare_bytes;
@@ -2079,6 +2132,9 @@ static int qcom_nandc_write_page_raw(struct nand_chip *chip,
 	u8 *data_buf, *oob_buf;
 	int i, ret;
 
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
+
 	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 	clear_read_regs(nandc);
 	clear_bam_transaction(nandc);
@@ -2097,7 +2153,7 @@ static int qcom_nandc_write_page_raw(struct nand_chip *chip,
 		data_size1 = mtd->writesize - host->cw_size * (ecc->steps - 1);
 		oob_size1 = host->bbm_size;
 
-		if (i == (ecc->steps - 1)) {
+		if (i == (ecc->steps - 1) && !host->boot_pages_conf) {
 			data_size2 = ecc->size - data_size1 -
 				     ((ecc->steps - 1) << 2);
 			oob_size2 = (ecc->steps << 2) + host->ecc_bytes_hw +
@@ -2156,6 +2212,9 @@ static int qcom_nandc_write_oob(struct nand_chip *chip, int page)
 	u8 *oob = chip->oob_poi;
 	int data_size, oob_size;
 	int ret;
+
+	if (host->boot_pages)
+		check_boot_pages_conf(host, page);
 
 	host->use_ecc = true;
 	clear_bam_transaction(nandc);
@@ -2805,6 +2864,7 @@ static int qcom_nand_host_init_and_register(struct qcom_nand_controller *nandc,
 	struct nand_chip *chip = &host->chip;
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct device *dev = nandc->dev;
+	u32 boot_pages_size;
 	int ret;
 
 	ret = of_property_read_u32(dn, "reg", &host->cs);
@@ -2864,6 +2924,17 @@ static int qcom_nand_host_init_and_register(struct qcom_nand_controller *nandc,
 	ret = mtd_device_register(mtd, NULL, 0);
 	if (ret)
 		nand_cleanup(chip);
+
+	if (nandc->props->has_boot_pages &&
+	    of_property_read_bool(dn, "nand-is-boot-medium")) {
+		ret = of_property_read_u32(dn, "qcom,boot_pages_size",
+					   &boot_pages_size);
+		if (ret)
+			dev_warn(dev, "can't get boot pages size");
+		else
+			/* Convert size to nand pages */
+			host->boot_pages = boot_pages_size / mtd->writesize;
+	}
 
 	return ret;
 }
@@ -3030,6 +3101,7 @@ static int qcom_nandc_remove(struct platform_device *pdev)
 static const struct qcom_nandc_props ipq806x_nandc_props = {
 	.ecc_modes = (ECC_RS_4BIT | ECC_BCH_8BIT),
 	.is_bam = false,
+	.has_boot_pages = true,
 	.dev_cmd_reg_start = 0x0,
 };
 
