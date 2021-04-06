@@ -45,11 +45,11 @@
 #define S9_STATUS_OFF		0x3674
 #define S10_STATUS_OFF		0x3678
 
-/* Original slope - 200 to compensate mC to C inaccuracy */
+/* Original slope - 350 to compensate mC to C inaccuracy */
 static u32 tsens_msm8960_slope[] = {
-			976, 976, 954, 976,
-			911, 932, 932, 999,
-			932, 999, 932
+			826, 826, 804, 826,
+			761, 782, 782, 849,
+			782, 849, 782
 			};
 
 static int suspend_8960(struct tsens_priv *priv)
