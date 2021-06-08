@@ -192,6 +192,7 @@ struct plat_stmmacenet_data {
 	unsigned int clk_ref_rate;
 	s32 ptp_max_adj;
 	struct reset_control *stmmac_rst;
+	struct reset_control *stmmac_ahb_rst;
 	struct stmmac_axi *axi;
 	int has_gmac4;
 	bool has_sun8i;
