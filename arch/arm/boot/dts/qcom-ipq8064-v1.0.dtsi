@@ -56,3 +56,7 @@
 		};
 	};
 };
+
+&CPU_SPC {
+	status = "okay";
+};
