@@ -617,6 +617,7 @@ static void __init mangle_bootargs(char *command_line)
 {
 	char *rootdev;
 	char *rootfs;
+	char *bootargs_override;
 
 	rootdev = strstr(command_line, "root=/dev/mtdblock");
 
@@ -627,6 +628,14 @@ static void __init mangle_bootargs(char *command_line)
 
 	if (rootfs)
 		strncpy(rootfs, "mangled_fs", 10);
+
+	bootargs_override = of_get_property(of_chosen, "bootargs-override", NULL);
+	if (bootargs_override) {
+		pr_crit("Old kernel command line: %s", command_line);
+		pr_crit("Overridden kernel command line: %s", bootargs_override);
+		strncpy(command_line, bootargs_override, COMMAND_LINE_SIZE);
+		strncpy(boot_command_line, bootargs_override, COMMAND_LINE_SIZE);
+	}
 
 }
 #else
