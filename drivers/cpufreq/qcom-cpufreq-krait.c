@@ -15,6 +15,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/thermal.h>
+#include <linux/fab_scaling.h>
 
 #include "cpufreq-dt.h"
 
@@ -67,6 +68,13 @@ static int set_target(struct cpufreq_policy *policy, unsigned int index)
 			dev_err(priv->cpu_dev, "Krait CPU can't operate at idle freq with L2 at 1GHz");
 			return -EINVAL;
 		}
+
+		/*
+		 * Scale fabrics with max freq across all cores
+		 */
+		ret = scale_fabrics(target_freq);
+		if (ret)
+			return ret;
 
 		opp = dev_pm_opp_find_level_exact(&l2_pdev->dev, level);
 		if (IS_ERR(opp)) {
