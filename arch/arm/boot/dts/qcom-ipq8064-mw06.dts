@@ -1,0 +1,6 @@
+#include "qcom-ipq8064-meter.dtsi"
+
+/ {
+        model = "Meter IPQ8064/mw06";
+        compatible = "meter,mw06", "qcom,ipq8064-ap161", "qcom,ipq8064";
+};
